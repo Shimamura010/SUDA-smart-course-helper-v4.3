@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         苏大双创平台智能刷课系统 v4.3
+// @name         苏大双创平台智能刷课系统
 // @namespace    http://tampermonkey.net/
 // @version      4.3
-// @description  智能检测视频时长+多重验证+状态确认+防暂停+弹窗处理
+// @description  智能检测视频时长+动态发送次数+多重验证+状态确认+防暂停+弹窗处理
 // @author       Shimamura
 // @match        https://suda.wnssedu.com/student/prese/studytasklist.htm*
 // @match        https://suda.wnssedu.com/course/newcourse/watch.htm*
@@ -84,6 +84,11 @@
             this.playbackCheckInterval = null;
             this.skipButtonCount = 0;
             
+            // 新增：动态发送次数计算相关
+            this.totalRequestsNeeded = 0;
+            this.currentRequestCount = 0;
+            this.requestsPerMinute = 8; // 每分钟发送8次请求（每7.5秒一次）
+            
             this.detectActualVideoDuration();
             this.monitorAllApiCalls();
             this.createControlPanel();
@@ -119,6 +124,7 @@
                         this.actualVideoDuration = Math.floor(videoElement.duration);
                         this.detectedVideoDuration = this.actualVideoDuration;
                         console.log('从视频元素检测到时长:', this.actualVideoDuration + '秒');
+                        this.calculateRequiredRequests(); // 计算所需请求次数
                         this.updateDurationDisplay();
                     } else {
                         setTimeout(checkDuration, 1000);
@@ -131,12 +137,23 @@
                         this.actualVideoDuration = Math.floor(videoElement.duration);
                         this.detectedVideoDuration = this.actualVideoDuration;
                         console.log('视频元数据加载，时长:', this.actualVideoDuration + '秒');
+                        this.calculateRequiredRequests(); // 计算所需请求次数
                         this.updateDurationDisplay();
                     }
                 });
             }
             
             this.extractDurationFromPage();
+        }
+        
+        // 🔥 新增：计算所需请求次数
+        calculateRequiredRequests() {
+            const videoDuration = this.actualVideoDuration || this.detectedVideoDuration;
+            if (videoDuration && videoDuration > 0) {
+                // 每次请求增加4分钟（240秒）的观看时间
+                this.totalRequestsNeeded = Math.ceil(videoDuration / 240);
+                console.log(`视频时长 ${videoDuration} 秒，需要发送 ${this.totalRequestsNeeded} 次学习记录`);
+            }
         }
         
         // 从页面文本提取时长
@@ -166,6 +183,7 @@
                     if (seconds > 0) {
                         this.detectedVideoDuration = seconds;
                         console.log('从页面文本检测到时长:', seconds + '秒');
+                        this.calculateRequiredRequests(); // 计算所需请求次数
                         this.updateDurationDisplay();
                         break;
                     }
@@ -368,7 +386,7 @@
         
         // 🔥 新增：启动弹窗检测
         startPopupDetection() {
-            this.popupCheckInterval = setInterval(() => {
+            this。popupCheckInterval = setInterval(() => {
                 if (this.isRunning) {
                     this.detectAndHandlePopups();
                 }
@@ -386,7 +404,7 @@
             
             const panel = document.createElement('div');
             panel.id = 'smart-course-panel';
-            panel.innerHTML = `
+            panel。innerHTML = `
                 <div style="
                     position: fixed;
                     top: 50px;
@@ -397,15 +415,15 @@
                     border-radius: 10px;
                     z-index: 10000;
                     font-family: Arial;
-                    width: ${this.pageType === 'video' ? '320px' : '280px'};
+                    width: ${this.pageType === 'video' ? '350px' : '280px'};
                     box-shadow: 0 0 20px rgba(0,0,0,0.8);
-                    border: 3px solid #${this.pageType === 'video' ? '9b59b6' : '3498db'};
+                    border: 3px solid #${this。pageType === 'video' ? '9b59b6' : '3498db'};
                 ">
-                    <div style="font-weight: bold; margin-bottom: 10px; text-align: center; color: #${this.pageType === 'video' ? '9b59b6' : '3498db'}; font-size: 16px;">
-                        ${this.pageType === 'video' ? '🧠 视频刷课系统 v4.3' : '📚 课程管理'}
+                    <div style="font-weight: bold; margin-bottom: 10px; text-align: center; color: #${this。pageType === 'video' ? '9b59b6' : '3498db'}; font-size: 16px;">
+                        ${this。pageType === 'video' ? '🧠 视频刷课系统 v4.4' : '📚 课程管理'}
                     </div>
                     
-                    ${this.pageType === 'video' ? `
+                    ${this。pageType === 'video' ? `
                     <div id="duration-info" style="
                         background: #2c3e50;
                         padding: 8px;
@@ -416,6 +434,18 @@
                         border: 1px solid #34495e;
                     ">
                         <div>视频时长检测中...</div>
+                    </div>
+                    
+                    <div id="requests-info" style="
+                        background: #2c3e50;
+                        padding: 6px;
+                        border-radius: 5px;
+                        margin-bottom: 8px;
+                        text-align: center;
+                        font-size: 10px;
+                        border: 1px solid #34495e;
+                    ">
+                        所需请求: <span id="requests-count">计算中...</span>
                     </div>
                     
                     <div id="api-info" style="
@@ -514,7 +544,7 @@
                     `}
                     
                     <div style="font-size: 9px; color: #7f8c8d; text-align: center; margin-top: 8px;">
-                        ${this.pageType === 'video' ? '智能检测 | 多重验证 | 弹窗处理' : '课程选择 | 自动导航'}
+                        ${this.pageType === 'video' ? '动态发送次数 | 智能检测 | 弹窗处理' : '课程选择 | 自动导航'}
                     </div>
                 </div>
             `;
@@ -556,34 +586,42 @@
             }
         }
         
-        // 智能进度计算
+        // 🔥 修改：智能进度计算 - 基于请求次数
         calculateSmartProgress() {
-            const baseDuration = this.actualVideoDuration || this.detectedVideoDuration || 665;
-            const elapsed = Date.now() - this.startTime;
-            const totalTime = Math.min(180, baseDuration) * 1000; // 最多3分钟完成
-            
-            return Math.min(1, elapsed / totalTime);
+            if (this.totalRequestsNeeded === 0) return 0;
+            return Math。min(1， this.currentRequestCount / this.totalRequestsNeeded);
         }
         
-        // 开始智能模拟
+        // 🔥 修改：开始智能模拟 - 基于动态请求次数
         startSmartSimulation() {
             if (this.isRunning) {
                 console.log('模拟已在运行中');
                 return;
             }
             
+            // 确保已经计算了所需请求次数
+            if (this.totalRequestsNeeded === 0) {
+                this.calculateRequiredRequests();
+                if (this.totalRequestsNeeded === 0) {
+                    alert('无法检测视频时长，请稍后重试或使用快速完成');
+                    return;
+                }
+            }
+            
             this.isRunning = true;
             this.startTime = Date.now();
             this.verificationCount = 0;
+            this.currentRequestCount = 0;
             
-            console.log('开始智能模拟学习');
+            console。log(`开始智能模拟学习，需要发送 ${this。totalRequestsNeeded} 次请求`);
             this.updateProgressDisplay(0);
+            this.updateRequestsDisplay();
             
             // 立即开始
-            this.smartProgressLoop();
+            this。smartProgressLoop();
         }
         
-        // 智能进度循环
+        // 🔥 修改：智能进度循环 - 基于动态请求次数
         smartProgressLoop() {
             if (!this.isRunning) return;
             
@@ -593,10 +631,11 @@
                 console.log('🛡️ 已处理弹窗干扰，继续学习进度');
             }
             
-            const progress = this.calculateSmartProgress();
-            const duration = this.actualVideoDuration || this.detectedVideoDuration || 665;
-            const currentSeconds = Math.floor(duration * progress);
+            // 计算当前累计观看时间（每次请求增加4分钟）
+            const currentSeconds = Math.min((this.currentRequestCount + 1) * 240, this.actualVideoDuration || this.detectedVideoDuration || 665);
             
+            this.currentRequestCount++;
+            const progress = this.calculateSmartProgress();
             this.currentProgress = progress;
             
             // 发送学习记录
@@ -608,11 +647,12 @@
             }
             
             // 更新界面
-            this.updateProgressDisplay(progress);
+            this。updateProgressDisplay(progress);
+            this.updateRequestsDisplay();
             
             // 检查完成条件
-            if (progress >= 0.95) {
-                console.log('达到95%进度，开始完成验证');
+            if (this.currentRequestCount >= this.totalRequestsNeeded || progress >= 0.95) {
+                console.log('达到所需请求次数或95%进度，开始完成验证');
                 this.sendCompletionVerification();
                 
                 // 多重验证确保完成
@@ -626,10 +666,13 @@
                     this.showCompletionMessage();
                 }, 10000);
             } else {
-                // 继续循环
+                // 继续循环 - 使用更短的间隔来加快完成速度
+                const interval = (180 * 1000) / this.totalRequestsNeeded; // 在3分钟内均匀分布所有请求
+                const actualInterval = Math.max(5000, Math.min(interval, 30000)); // 间隔在5-30秒之间
+                
                 this.intervalId = setTimeout(() => {
                     this.smartProgressLoop();
-                }, 30000); // 30秒间隔
+                }, actualInterval);
             }
         }
         
@@ -688,7 +731,7 @@
                 data: data,
                 onload: (response) => {
                     if (response.status === 200) {
-                        console.log(`✅ ${type}成功`);
+                        console.log(`✅ ${type}成功 (${this.currentRequestCount}/${this.totalRequestsNeeded})`);
                     } else {
                         console.log(`⚠️ ${type}响应: ${response.status}`);
                     }
@@ -704,9 +747,18 @@
             console.log('执行快速完成');
             this.stopSimulation();
             
-            // 直接发送完成验证
-            this.sendCompletionVerification();
-            setTimeout(() => this.sendCompletionVerification(), 2000);
+            // 计算所需请求次数
+            if (this.totalRequestsNeeded === 0) {
+                this.calculateRequiredRequests();
+            }
+            
+            // 发送最终完成的学习记录
+            const finalSeconds = this.actualVideoDuration || this.detectedVideoDuration || 665;
+            this.sendRecordStudy(finalSeconds);
+            
+            // 多重验证确保完成
+            setTimeout(() => this.sendCompletionVerification(), 1000);
+            setTimeout(() => this.sendCompletionVerification(), 3000);
             setTimeout(() => {
                 this.sendCompletionVerification();
                 this.showCompletionMessage();
@@ -755,6 +807,23 @@
             if (apiCountElement) {
                 apiCountElement.textContent = this.apiEndpoints.size;
             }
+            
+            this.updateRequestsDisplay();
+        }
+        
+        // 🔥 新增：更新请求次数显示
+        updateRequestsDisplay() {
+            if (this.pageType !== 'video') return;
+            
+            const requestsElement = document.getElementById('requests-count');
+            if (requestsElement) {
+                if (this.totalRequestsNeeded > 0) {
+                    requestsElement.textContent = `${this.currentRequestCount}/${this.totalRequestsNeeded} 次`;
+                    requestsElement.style.color = this.currentRequestCount >= this.totalRequestsNeeded ? '#2ecc71' : '#f39c12';
+                } else {
+                    requestsElement.textContent = '计算中...';
+                }
+            }
         }
         
         // 更新进度显示
@@ -765,8 +834,8 @@
             const progressBar = document.getElementById('progress-bar');
             
             if (progressElement && progressBar) {
-                const percent = (progress * 100).toFixed(1);
-                const duration = this.actualVideoDuration || this.detectedVideoDuration || 665;
+                const percent = (progress * 100)。toFixed(1);
+                const duration = this。actualVideoDuration || this.detectedVideoDuration || 665;
                 const currentSeconds = Math.floor(duration * progress);
                 
                 progressElement.innerHTML = `
@@ -777,7 +846,7 @@
                         <div id="progress-bar" style="background: #9b59b6; height: 100%; width: ${percent}%; transition: width 0.3s;"></div>
                     </div>
                     <div style="font-size: 9px; margin-top: 5px; color: #bdc3c7;">
-                        验证次数: ${this.verificationCount} | 跳过弹窗: ${this.skipButtonCount}
+                        请求: ${this。currentRequestCount}/${this。totalRequestsNeeded} | 验证: ${this。verificationCount} | 弹窗: ${this。skipButtonCount}
                     </div>
                 `;
             }
@@ -792,28 +861,28 @@
                         ✅ 学习完成!
                     </div>
                     <div style="font-size: 10px; margin-top: 5px; color: #bdc3c7;">
-                        已完成 ${this.verificationCount} 次验证
+                        已完成 ${this。totalRequestsNeeded} 次学习记录
                     </div>
                     <div style="font-size: 9px; margin-top: 3px; color: #bdc3c7;">
-                        处理了 ${this.skipButtonCount} 个弹窗
+                        处理了 ${this。skipButtonCount} 个弹窗
                     </div>
                 `;
             }
             
             setTimeout(() => {
-                if (confirm('🎉 智能刷课完成！\n弹窗防护系统已处理所有干扰。\n\n是否立即刷新确认课程状态？')) {
-                    window.location.reload();
+                if (confirm('🎉 智能刷课完成！\n动态发送系统已确保完整观看记录。\n\n是否立即刷新确认课程状态？')) {
+                    window。location。reload();
                 }
-            }, 1500);
+            }， 1500);
         }
     }
     
     // 启动系统
     function initializeSystem() {
-        console.log('🎯 开始初始化智能刷课系统 v4.3...');
+        console.log('🎯 开始初始化智能刷课系统 v4.4...');
         
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
+            document。addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => {
                     new UniversalCourseCompleter();
                 }, 1000);
